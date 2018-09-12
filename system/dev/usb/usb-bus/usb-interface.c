@@ -464,8 +464,7 @@ zx_status_t usb_interface_get_string_descriptor(void* ctx,
                                                 uint8_t desc_id, uint16_t* inout_lang_id,
                                                 uint8_t* buf, size_t* inout_buflen) {
     usb_interface_t* intf = ctx;
-    return usb_device_get_string_descriptor(intf->device,
-                                            desc_id, inout_lang_id, buf, inout_buflen);
+    return usb_util_get_string_descriptor(intf->device, desc_id, inout_lang_id, buf, inout_buflen);
 }
 
 static zx_status_t usb_interface_claim_device_interface(void* ctx,
@@ -743,7 +742,6 @@ zx_status_t usb_interface_set_alt_setting(usb_interface_t* intf, uint8_t interfa
     zx_status_t status = usb_interface_configure_endpoints(intf, interface_id, alt_setting);
     if (status != ZX_OK) return status;
 
-    return usb_device_control(intf->device,
-                              USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
-                              USB_REQ_SET_INTERFACE, alt_setting, interface_id, NULL, 0);
+    return usb_util_control(intf->device, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
+                            USB_REQ_SET_INTERFACE, alt_setting, interface_id, NULL, 0);
 }
