@@ -38,27 +38,27 @@ static const usb_config_override_t config_overrides[] = {
 static zx_status_t usb_device_add_interfaces(usb_device_t* parent,
                                              usb_configuration_descriptor_t* config);
 
-zx_status_t usb_device_set_interface(usb_device_t* device, uint8_t interface_id,
+zx_status_t usb_device_set_interface(usb_device_t* dev, uint8_t interface_id,
                                      uint8_t alt_setting) {
-    mtx_lock(&device->interface_mutex);
+    mtx_lock(&dev->interface_mutex);
     usb_interface_t* intf;
-    list_for_every_entry(&device->children, intf, usb_interface_t, node) {
+    list_for_every_entry(&dev->children, intf, usb_interface_t, node) {
         if (usb_interface_contains_interface(intf, interface_id)) {
-            mtx_unlock(&device->interface_mutex);
+            mtx_unlock(&dev->interface_mutex);
             return usb_interface_set_alt_setting(intf, interface_id, alt_setting);
         }
     }
-    mtx_unlock(&device->interface_mutex);
+    mtx_unlock(&dev->interface_mutex);
     return ZX_ERR_INVALID_ARGS;
 }
 
-void usb_device_set_hub_interface(usb_device_t* device, usb_hub_interface_t* hub_intf) {
-    mtx_lock(&device->interface_mutex);
-    device->isHub = true;
+void usb_device_set_hub_interface(usb_device_t* dev, usb_hub_interface_t* hub_intf) {
+    mtx_lock(&dev->interface_mutex);
+    dev->isHub = true;
     if (hub_intf) {
-        memcpy(&device->hub_intf, hub_intf, sizeof(device->hub_intf));
+        memcpy(&dev->hub_intf, hub_intf, sizeof(dev->hub_intf));
     }
-    mtx_unlock(&device->interface_mutex);
+    mtx_unlock(&dev->interface_mutex);
 }
 
 static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int config) {
@@ -72,35 +72,35 @@ static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int co
     return NULL;
 }
 
-static void usb_device_remove_interfaces(usb_device_t* device) {
-    mtx_lock(&device->interface_mutex);
+static void usb_device_remove_interfaces(usb_device_t* dev) {
+    mtx_lock(&dev->interface_mutex);
 
     usb_interface_t* intf;
-    while ((intf = list_remove_head_type(&device->children, usb_interface_t, node)) != NULL) {
+    while ((intf = list_remove_head_type(&dev->children, usb_interface_t, node)) != NULL) {
         device_remove(intf->zxdev);
     }
 
-    mtx_unlock(&device->interface_mutex);
+    mtx_unlock(&dev->interface_mutex);
 }
 
-zx_status_t usb_device_claim_interface(usb_device_t* device, uint8_t interface_id) {
-    mtx_lock(&device->interface_mutex);
+zx_status_t usb_device_claim_interface(usb_device_t* dev, uint8_t interface_id) {
+    mtx_lock(&dev->interface_mutex);
 
-    interface_status_t status = device->interface_statuses[interface_id];
+    interface_status_t status = dev->interface_statuses[interface_id];
     if (status == CLAIMED) {
         // The interface has already been claimed by a different interface.
-        mtx_unlock(&device->interface_mutex);
+        mtx_unlock(&dev->interface_mutex);
         return ZX_ERR_ALREADY_BOUND;
     } else if (status == CHILD_DEVICE) {
-        bool removed = usb_device_remove_interface_by_id_locked(device, interface_id);
+        bool removed = usb_device_remove_interface_by_id_locked(dev, interface_id);
         if (!removed) {
-            mtx_unlock(&device->interface_mutex);
+            mtx_unlock(&dev->interface_mutex);
             return ZX_ERR_BAD_STATE;
         }
     }
-    device->interface_statuses[interface_id] = CLAIMED;
+    dev->interface_statuses[interface_id] = CLAIMED;
 
-    mtx_unlock(&device->interface_mutex);
+    mtx_unlock(&dev->interface_mutex);
 
     return ZX_OK;
 }
