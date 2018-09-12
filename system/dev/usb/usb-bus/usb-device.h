@@ -9,6 +9,7 @@
 #include <ddk/protocol/usb-hci.h>
 #include <ddk/protocol/usb-hub.h>
 #include <ddk/usb-request/usb-request.h>
+#include <lib/sync/completion.h>
 #include <zircon/hw/usb.h>
 
 #include <threads.h>
@@ -59,6 +60,16 @@ typedef struct usb_device {
 
     list_node_t node;
 
+    // thread for calling client's usb request complete callback
+    thrd_t callback_thread;
+    bool callback_thread_stop;
+    // completion used for signalling callback_thread
+    sync_completion_t callback_thread_completion;
+    // list of requests that need to have client's completion callback called
+    list_node_t completed_reqs;
+    // mutex that protects the callback_* members above
+    mtx_t callback_lock;
+
     // pool of requests that can be reused
     usb_request_pool_t free_reqs;
 } usb_device_t;
@@ -69,11 +80,15 @@ zx_status_t usb_device_add(usb_bus_t* bus, uint32_t device_id, uint32_t hub_id,
 void usb_device_remove(usb_device_t* dev);
 void usb_device_set_hub_interface(usb_device_t* dev, usb_hub_interface_t* hub_intf);
 
-zx_status_t usb_device_set_interface(usb_device_t* device, uint8_t interface_id,
-                                     uint8_t alt_setting);
-
 // Marks the interface as claimed, removing the device if it exists.
 // Returns an error if the interface was already claimed by another interface.
 zx_status_t usb_device_claim_interface(usb_device_t* dev, uint8_t interface_id);
 
-zx_status_t usb_device_set_configuration(usb_device_t* dev, int config);
+// device protocol functions shared with usb_interface_t
+zx_status_t usb_device_control(void* ctx, uint8_t request_type, uint8_t request, uint16_t value,
+                               uint16_t index, void* data, size_t length, zx_time_t timeout,
+                               size_t* out_length);
+void usb_device_request_queue(void* ctx, usb_request_t* usb_request);
+zx_status_t usb_device_set_interface(void* ctx, uint8_t interface_id, uint8_t alt_setting);
+zx_status_t usb_device_set_configuration(void* ctx, uint8_t configuration);
+
