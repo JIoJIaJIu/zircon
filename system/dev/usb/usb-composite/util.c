@@ -10,8 +10,6 @@
 #include <string.h>
 #include <utf_conversion/utf_conversion.h>
 
-#include "usb-bus.h"
-#include "usb-device.h"
 #include "util.h"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))

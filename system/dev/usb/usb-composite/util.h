@@ -6,6 +6,8 @@
 
 #include <ddk/device.h>
 
+#include "usb-composite.h"
+
 zx_status_t usb_util_control(usb_device_t* dev, uint8_t request_type,  uint8_t request,
                              uint16_t value, uint16_t index, void* data, size_t length);
 

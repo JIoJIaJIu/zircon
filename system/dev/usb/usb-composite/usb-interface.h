@@ -8,14 +8,7 @@
 #include <zircon/device/usb.h>
 #include <zircon/hw/usb.h>
 
-typedef enum {
-    // The interface has not been claimed and no device has been created for it.
-    AVAILABLE,
-    // Another interface has claimed the interface.
-    CLAIMED,
-    // A child device has been created for the interface.
-    CHILD_DEVICE
-} interface_status_t;
+#include "usb-composite.h"
 
 // Represents an interface within a composite device
 typedef struct {

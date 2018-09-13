@@ -9,8 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "usb-bus.h"
-#include "usb-device.h"
+#include "usb-composite.h"
 #include "usb-interface.h"
 #include "util.h"
 
