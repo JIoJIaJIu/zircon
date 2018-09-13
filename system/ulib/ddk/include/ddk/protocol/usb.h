@@ -145,6 +145,8 @@ typedef struct usb_protocol_ops {
     usb_speed_t (*get_speed)(void* ctx);
     zx_status_t (*set_interface)(void* ctx, uint8_t interface_number, uint8_t alt_setting);
     zx_status_t (*set_configuration)(void* ctx, uint8_t configuration);
+    zx_status_t (*enable_endpoint)(void* ctx, usb_endpoint_descriptor_t* ep_desc,
+                                   usb_ss_ep_comp_descriptor_t* ss_comp_desc, bool enable);
     zx_status_t (*reset_endpoint)(void* ctx, uint8_t ep_address);
     size_t (*get_max_transfer_size)(void* ctx, uint8_t ep_address);
     uint32_t (*get_device_id)(void* ctx);
@@ -279,6 +281,14 @@ static inline zx_status_t usb_set_interface(const usb_protocol_t* usb, uint8_t i
 
 static inline zx_status_t usb_set_configuration(const usb_protocol_t* usb, uint8_t configuration) {
     return usb->ops->set_configuration(usb->ctx, configuration);
+}
+
+
+static inline zx_status_t usb_enable_endpoint(const usb_protocol_t* usb,
+                                              usb_endpoint_descriptor_t* ep_desc,
+                                              usb_ss_ep_comp_descriptor_t* ss_comp_desc,
+                                              bool enable) {
+    return usb->ops->enable_endpoint(usb->ctx, ep_desc, ss_comp_desc, enable);
 }
 
 // Resets an endpoint that is in a halted or error state.

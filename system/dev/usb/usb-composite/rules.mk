@@ -1,4 +1,4 @@
-# Copyright 2016 The Fuchsia Authors. All rights reserved.
+# Copyright 2018 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,14 +11,15 @@ MODULE_TYPE := driver
 MODULE_SRCS := \
     $(LOCAL_DIR)/usb-composite.c \
     $(LOCAL_DIR)/usb-interface.c \
-    $(LOCAL_DIR)/util.c \
 
-MODULE_STATIC_LIBS := system/ulib/ddk \
-                      system/dev/lib/usb \
-                      system/ulib/sync \
-                      system/ulib/utf_conversion \
-                      system/dev/lib/usb-request \
+MODULE_STATIC_LIBS := \
+    system/ulib/ddk \
+    system/dev/lib/usb \
+    system/ulib/sync \
 
-MODULE_LIBS := system/ulib/driver system/ulib/zircon system/ulib/c
+MODULE_LIBS := \
+    system/ulib/driver \
+    system/ulib/zircon \
+    system/ulib/c
 
 include make/module.mk

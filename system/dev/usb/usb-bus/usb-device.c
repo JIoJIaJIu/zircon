@@ -494,6 +494,13 @@ zx_status_t usb_device_set_configuration(void* ctx, uint8_t config) {
 return -1;
 }
 
+static zx_status_t usb_device_enable_endpoint(void* ctx, usb_endpoint_descriptor_t* ep_desc,
+                                              usb_ss_ep_comp_descriptor_t* ss_comp_desc,
+                                              bool enable) {
+    usb_device_t* dev = ctx;
+    return usb_hci_enable_endpoint(&dev->hci, dev->device_id, ep_desc, ss_comp_desc, enable);
+}
+
 static zx_status_t usb_device_reset_endpoint(void* ctx, uint8_t ep_address) {
     usb_device_t* dev = ctx;
     return usb_hci_reset_endpoint(&dev->hci, dev->device_id, ep_address);
@@ -575,6 +582,7 @@ static usb_protocol_ops_t _usb_protocol = {
     .get_speed = usb_device_get_speed,
     .set_interface = usb_device_set_interface,
     .set_configuration = usb_device_set_configuration,
+    .enable_endpoint = usb_device_enable_endpoint,
     .reset_endpoint = usb_device_reset_endpoint,
     .get_max_transfer_size = usb_device_get_max_transfer_size,
     .get_device_id = _usb_device_get_device_id,

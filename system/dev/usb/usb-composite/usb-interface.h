@@ -14,9 +14,6 @@
 typedef struct {
     zx_device_t* zxdev;
     usb_device_t* device;
-    zx_device_t* hci_zxdev;
-    usb_hci_protocol_t hci;
-    uint32_t device_id;
 
     // ID of the last interface in the descriptor list.
     uint8_t last_interface_id;
