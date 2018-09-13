@@ -8,6 +8,15 @@
 #include <zircon/device/usb.h>
 #include <zircon/hw/usb.h>
 
+typedef enum {
+    // The interface has not been claimed and no device has been created for it.
+    AVAILABLE,
+    // Another interface has claimed the interface.
+    CLAIMED,
+    // A child device has been created for the interface.
+    CHILD_DEVICE
+} interface_status_t;
+
 // Represents an interface within a composite device
 typedef struct {
     zx_device_t* zxdev;
@@ -46,8 +55,6 @@ zx_status_t usb_device_add_interface_association(usb_device_t* device,
 
 // returns whether the interface with the given id was removed.
 bool usb_device_remove_interface_by_id_locked(usb_device_t* device, uint8_t interface_id);
-
-zx_status_t usb_interface_get_device_id(zx_device_t* device, uint32_t* id);
 
 bool usb_interface_contains_interface(usb_interface_t* intf, uint8_t interface_id);
 

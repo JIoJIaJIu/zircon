@@ -254,7 +254,7 @@ static size_t usb_interface_get_max_transfer_size(void* ctx, uint8_t ep_address)
     return usb_hci_get_max_transfer_size(&intf->hci, intf->device_id, ep_address);
 }
 
-static uint32_t _usb_interface_get_device_id(void* ctx) {
+static uint32_t usb_interface_get_device_id(void* ctx) {
     usb_interface_t* intf = ctx;
     return intf->device_id;
 }
@@ -380,7 +380,7 @@ static usb_protocol_ops_t _usb_protocol = {
     .set_configuration = usb_interface_set_configuration,
     .reset_endpoint = usb_interface_reset_endpoint,
     .get_max_transfer_size = usb_interface_get_max_transfer_size,
-    .get_device_id = _usb_interface_get_device_id,
+    .get_device_id = usb_interface_get_device_id,
     .get_device_descriptor = usb_interface_get_device_descriptor,
     .get_descriptor_list = usb_interface_get_descriptor_list,
     .get_additional_descriptor_list = usb_interface_get_additional_descriptor_list,
@@ -552,15 +552,6 @@ bool usb_device_remove_interface_by_id_locked(usb_device_t* device, uint8_t inte
         }
     }
     return false;
-}
-
-zx_status_t usb_interface_get_device_id(zx_device_t* device, uint32_t* out) {
-    usb_protocol_t usb;
-    if (device_get_protocol(device, ZX_PROTOCOL_USB, &usb) != ZX_OK) {
-        return ZX_ERR_INTERNAL;
-    }
-    *out = usb_get_device_id(&usb);
-    return ZX_OK;
 }
 
 bool usb_interface_contains_interface(usb_interface_t* intf, uint8_t interface_id) {

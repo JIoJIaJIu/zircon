@@ -4,13 +4,14 @@
 
 #include <ddk/debug.h>
 #include <ddk/usb/usb.h>
-#include <zircon/device/usb.h>
+#include <zircon/hw/usb-audio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "usb-bus.h"
 #include "usb-device.h"
+#include "usb-interface.h"
 #include "util.h"
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
@@ -94,6 +95,17 @@ static void request_complete(usb_request_t* req, void* cookie) {
     sync_completion_signal(&dev->callback_thread_completion);
 }
 
+static zx_status_t usb_device_add_interfaces(usb_device_t* parent,
+                                             usb_configuration_descriptor_t* config);
+
+void usb_device_set_hub_interface(usb_device_t* dev, usb_hub_interface_t* hub_intf) {
+    mtx_lock(&dev->interface_mutex);
+    dev->isHub = true;
+    if (hub_intf) {
+        memcpy(&dev->hub_intf, hub_intf, sizeof(dev->hub_intf));
+    }
+    mtx_unlock(&dev->interface_mutex);
+}
 
 static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int config) {
     int num_configurations = dev->device_desc.bNumConfigurations;
@@ -105,6 +117,74 @@ static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int co
     }
     return NULL;
 }
+
+static void usb_device_remove_interfaces(usb_device_t* dev) {
+    mtx_lock(&dev->interface_mutex);
+
+    usb_interface_t* intf;
+    while ((intf = list_remove_head_type(&dev->children, usb_interface_t, node)) != NULL) {
+        device_remove(intf->zxdev);
+    }
+
+    mtx_unlock(&dev->interface_mutex);
+}
+
+zx_status_t usb_device_claim_interface(usb_device_t* dev, uint8_t interface_id) {
+    mtx_lock(&dev->interface_mutex);
+
+    interface_status_t status = dev->interface_statuses[interface_id];
+    if (status == CLAIMED) {
+        // The interface has already been claimed by a different interface.
+        mtx_unlock(&dev->interface_mutex);
+        return ZX_ERR_ALREADY_BOUND;
+    } else if (status == CHILD_DEVICE) {
+        bool removed = usb_device_remove_interface_by_id_locked(dev, interface_id);
+        if (!removed) {
+            mtx_unlock(&dev->interface_mutex);
+            return ZX_ERR_BAD_STATE;
+        }
+    }
+    dev->interface_statuses[interface_id] = CLAIMED;
+
+    mtx_unlock(&dev->interface_mutex);
+
+    return ZX_OK;
+}
+
+/*
+zx_status_t usb_device_set_configuration(usb_device_t* dev, int config) {
+    int num_configurations = dev->device_desc.bNumConfigurations;
+    usb_configuration_descriptor_t* config_desc = NULL;
+    int config_index = -1;
+
+    // validate config and get the new current_config_index
+    for (int i = 0; i < num_configurations; i++) {
+        usb_configuration_descriptor_t* desc = dev->config_descs[i];
+        if (desc->bConfigurationValue == config) {
+            config_desc = desc;
+            config_index = i;
+            break;
+        }
+    }
+    if (!config_desc) return ZX_ERR_INVALID_ARGS;
+
+    // set configuration
+    zx_status_t status = usb_util_control(dev, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                             USB_REQ_SET_CONFIGURATION, config, 0, NULL, 0);
+    if (status < 0) {
+        zxlogf(ERROR, "usb_device_set_configuration: USB_REQ_SET_CONFIGURATION failed\n");
+        return status;
+    }
+
+    dev->current_config_index = config_index;
+
+    // tear down and recreate the subdevices for our interfaces
+    usb_device_remove_interfaces(dev);
+    memset(dev->interface_statuses, 0,
+           config_desc->bNumInterfaces * sizeof(interface_status_t));
+    return usb_device_add_interfaces(dev, config_desc);
+}
+*/
 
 static zx_status_t usb_device_ioctl(void* ctx, uint32_t op, const void* in_buf, size_t in_len,
                                     void* out_buf, size_t out_len, size_t* out_actual) {
@@ -200,9 +280,8 @@ static zx_status_t usb_device_ioctl(void* ctx, uint32_t op, const void* in_buf, 
     }
     case IOCTL_USB_SET_INTERFACE: {
         if (in_len != 2 * sizeof(int)) return ZX_ERR_INVALID_ARGS;
-//        int* args = (int *)in_buf;
-//FIXME        return usb_device_set_interface(dev, args[0], args[1]);
-return -1;
+        int* args = (int *)in_buf;
+        return usb_device_set_interface(dev, args[0], args[1]);
     }
     case IOCTL_USB_GET_CURRENT_FRAME: {
         uint64_t* reply = out_buf;
@@ -235,10 +314,9 @@ return -1;
     }
     case IOCTL_USB_SET_CONFIGURATION: {
         if (in_len != sizeof(int)) return ZX_ERR_INVALID_ARGS;
-//        int config = *((int *)in_buf);
-//        zxlogf(TRACE, "IOCTL_USB_SET_CONFIGURATION %d\n", config);
-//FIXME        return usb_device_set_configuration(dev, config);
-return -1;
+        int config = *((int *)in_buf);
+        zxlogf(TRACE, "IOCTL_USB_SET_CONFIGURATION %d\n", config);
+        return usb_device_set_configuration(dev, config);
     }
     default:
         return ZX_ERR_NOT_SUPPORTED;
@@ -247,6 +325,7 @@ return -1;
 
 static void usb_device_unbind(void* ctx) {
     usb_device_t* dev = ctx;
+    usb_device_remove_interfaces(dev);
     device_remove(dev->zxdev);
 }
 
@@ -263,6 +342,7 @@ static void usb_device_release(void* ctx) {
         free(dev->config_descs);
     }
     free((void*)dev->lang_ids);
+    free(dev->interface_statuses);
     free(dev);
 }
 
@@ -271,6 +351,110 @@ static zx_protocol_device_t usb_device_proto = {
     .ioctl = usb_device_ioctl,
     .release = usb_device_release,
 };
+
+#define NEXT_DESCRIPTOR(header) ((usb_descriptor_header_t*)((void*)header + header->bLength))
+
+static zx_status_t usb_device_add_interfaces(usb_device_t* parent,
+                                             usb_configuration_descriptor_t* config) {
+    usb_device_descriptor_t* device_desc = &parent->device_desc;
+    zx_status_t result = ZX_OK;
+
+    // Iterate through interfaces in first configuration and create devices for them
+    usb_descriptor_header_t* header = NEXT_DESCRIPTOR(config);
+    usb_descriptor_header_t* end = (usb_descriptor_header_t*)((void*)config + le16toh(config->wTotalLength));
+
+    while (header < end) {
+        if (header->bDescriptorType == USB_DT_INTERFACE_ASSOCIATION) {
+            usb_interface_assoc_descriptor_t* assoc_desc = (usb_interface_assoc_descriptor_t*)header;
+            int interface_count = assoc_desc->bInterfaceCount;
+
+            // find end of this interface association
+            usb_descriptor_header_t* next = NEXT_DESCRIPTOR(assoc_desc);
+            while (next < end) {
+                if (next->bDescriptorType == USB_DT_INTERFACE_ASSOCIATION) {
+                    break;
+                } else if (next->bDescriptorType == USB_DT_INTERFACE) {
+                    usb_interface_descriptor_t* test_intf = (usb_interface_descriptor_t*)next;
+
+                    if (test_intf->bAlternateSetting == 0) {
+                        if (interface_count == 0) {
+                            break;
+                        }
+                        interface_count--;
+                    }
+                }
+                next = NEXT_DESCRIPTOR(next);
+            }
+
+            size_t length = (void *)next - (void *)assoc_desc;
+            usb_interface_assoc_descriptor_t* assoc_copy = malloc(length);
+            if (!assoc_copy) return ZX_ERR_NO_MEMORY;
+            memcpy(assoc_copy, assoc_desc, length);
+
+            zx_status_t status = usb_device_add_interface_association(parent, device_desc, assoc_copy, length);
+            if (status != ZX_OK) {
+                result = status;
+            }
+
+            header = next;
+        } else if (header->bDescriptorType == USB_DT_INTERFACE) {
+            usb_interface_descriptor_t* intf_desc = (usb_interface_descriptor_t*)header;
+            // find end of current interface descriptor
+            usb_descriptor_header_t* next = NEXT_DESCRIPTOR(intf_desc);
+            while (next < end) {
+                if (next->bDescriptorType == USB_DT_INTERFACE) {
+                    usb_interface_descriptor_t* test_intf = (usb_interface_descriptor_t*)next;
+                    // Iterate until we find the next top-level interface
+                    // Include alternate interfaces in the current interface
+                    if (test_intf->bAlternateSetting == 0) {
+                        break;
+                    }
+                }
+                next = NEXT_DESCRIPTOR(next);
+            }
+
+            // Only create a child device if no child interface has claimed this interface.
+            mtx_lock(&parent->interface_mutex);
+            interface_status_t intf_status = parent->interface_statuses[intf_desc->bInterfaceNumber];
+            mtx_unlock(&parent->interface_mutex);
+
+            size_t length = (void *)next - (void *)intf_desc;
+            if (intf_status == AVAILABLE) {
+                usb_interface_descriptor_t* intf_copy = malloc(length);
+                if (!intf_copy) return ZX_ERR_NO_MEMORY;
+                memcpy(intf_copy, intf_desc, length);
+                zx_status_t status = usb_device_add_interface(parent, device_desc,
+                                                              intf_copy, length);
+                if (status != ZX_OK) {
+                    result = status;
+                }
+                // The interface may have been claimed in the meanwhile, so we need to
+                // check the interface status again.
+                mtx_lock(&parent->interface_mutex);
+                if (parent->interface_statuses[intf_desc->bInterfaceNumber] == CLAIMED) {
+                    bool removed = usb_device_remove_interface_by_id_locked(parent,
+                                                                            intf_desc->bInterfaceNumber);
+                    if (!removed) {
+                        mtx_unlock(&parent->interface_mutex);
+                        return ZX_ERR_BAD_STATE;
+                    }
+                } else {
+                    parent->interface_statuses[intf_desc->bInterfaceNumber] = CHILD_DEVICE;
+                }
+                mtx_unlock(&parent->interface_mutex);
+            }
+            header = next;
+        } else {
+            header = NEXT_DESCRIPTOR(header);
+        }
+    }
+
+    return result;
+}
+
+
+#define NEXT_DESCRIPTOR(header) ((usb_descriptor_header_t*)((void*)header + header->bLength))
+
 
 static zx_status_t usb_device_req_alloc(void* ctx, usb_request_t** out, uint64_t data_size,
                                            uint8_t ep_address) {
@@ -347,9 +531,9 @@ static void usb_control_complete(usb_request_t* req, void* cookie) {
     sync_completion_signal((sync_completion_t*)cookie);
 }
 
-static zx_status_t usb_device_control(void* ctx, uint8_t request_type, uint8_t request,
-                                      uint16_t value, uint16_t index, void* data, size_t length,
-                                      zx_time_t timeout, size_t* out_length) {
+zx_status_t usb_device_control(void* ctx, uint8_t request_type, uint8_t request, uint16_t value,
+                               uint16_t index, void* data, size_t length, zx_time_t timeout,
+                               size_t* out_length) {
     usb_device_t* dev = ctx;
 
     usb_request_t* req = NULL;
@@ -418,7 +602,7 @@ static zx_status_t usb_device_control(void* ctx, uint8_t request_type, uint8_t r
     return status;
 }
 
-static void usb_device_request_queue(void* ctx, usb_request_t* req) {
+void usb_device_request_queue(void* ctx, usb_request_t* req) {
     usb_device_t* dev = ctx;
 
     req->header.device_id = dev->device_id;
@@ -439,9 +623,7 @@ static usb_speed_t usb_device_get_speed(void* ctx) {
     return dev->speed;
 }
 
-static zx_status_t usb_device_set_interface(void* ctx, uint8_t interface_number,
-                                            uint8_t alt_setting) {
-/*
+zx_status_t usb_device_set_interface(void* ctx, uint8_t interface_number, uint8_t alt_setting) {
     usb_device_t* dev = ctx;
 
     mtx_lock(&dev->interface_mutex);
@@ -453,12 +635,10 @@ static zx_status_t usb_device_set_interface(void* ctx, uint8_t interface_number,
         }
     }
     mtx_unlock(&dev->interface_mutex);
-*/
     return ZX_ERR_INVALID_ARGS;
 }
 
 zx_status_t usb_device_set_configuration(void* ctx, uint8_t config) {
-/* FIXME
     usb_device_t* dev = ctx;
     int num_configurations = dev->device_desc.bNumConfigurations;
     usb_configuration_descriptor_t* config_desc = NULL;
@@ -490,8 +670,6 @@ zx_status_t usb_device_set_configuration(void* ctx, uint8_t config) {
     memset(dev->interface_statuses, 0,
            config_desc->bNumInterfaces * sizeof(interface_status_t));
     return usb_device_add_interfaces(dev, config_desc);
-*/
-return -1;
 }
 
 static zx_status_t usb_device_reset_endpoint(void* ctx, uint8_t ep_address) {
@@ -677,10 +855,21 @@ zx_status_t usb_device_add(usb_bus_t* bus, uint32_t device_id, uint32_t hub_id,
             device_desc->idVendor, device_desc->idProduct, device_desc->bcdUSB >> 8,
             device_desc->bcdUSB & 0xff, configuration);
 
+    list_initialize(&dev->children);
     dev->hci_zxdev = bus->hci_zxdev;
     dev->hub_id = hub_id;
     dev->speed = speed;
     dev->config_descs = configs;
+
+    usb_configuration_descriptor_t* cur_config = configs[dev->current_config_index];
+
+    mtx_init(&dev->interface_mutex, mtx_plain);
+    dev->interface_statuses = calloc(cur_config->bNumInterfaces,
+                                     sizeof(interface_status_t));
+    if (!dev->interface_statuses) {
+        status = ZX_ERR_NO_MEMORY;
+        goto error_exit;
+    }
 
     // callback thread must be started before device_add() since it will recursively
     // bind other drivers to us before it returns.
@@ -703,20 +892,24 @@ zx_status_t usb_device_add(usb_bus_t* bus, uint32_t device_id, uint32_t hub_id,
         .name = name,
         .ctx = dev,
         .ops = &usb_device_proto,
-        .proto_id = ZX_PROTOCOL_USB_DEVICE,
+        .proto_id = ZX_PROTOCOL_USB,
         .proto_ops = &_usb_protocol,
         .props = props,
         .prop_count = countof(props),
+        // Do not allow binding to root of a composite device.
+        // Clients will bind to the child interfaces instead.
+        .flags = DEVICE_ADD_NON_BINDABLE,
     };
 
     status = device_add(bus->zxdev, &args, &dev->zxdev);
     if (status == ZX_OK) {
         *out_device = dev;
-        return ZX_OK;
     } else {
         stop_callback_thread(dev);
-        // fall through
+        goto error_exit;
     }
+
+    return usb_device_add_interfaces(dev, cur_config);
 
 error_exit:
     if (configs) {
@@ -725,6 +918,7 @@ error_exit:
         }
         free(configs);
     }
+    free(dev->interface_statuses);
     free(dev);
     return status;
 }

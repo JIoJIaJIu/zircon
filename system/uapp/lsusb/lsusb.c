@@ -20,7 +20,7 @@
 #include <zircon/device/usb.h>
 #include <pretty/hexdump.h>
 
-#define DEV_USB "/dev/class/usb"
+#define DEV_USB "/dev/class/usb-device"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 

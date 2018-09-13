@@ -35,6 +35,7 @@ DDK_PROTOCOL_DEF(TPM,            'pTPM', "tpm", 0)
 DDK_PROTOCOL_DEF(USB,            'pUSB', "usb", 0)
 DDK_PROTOCOL_DEF(USB_BUS,        'pUBS', "usb-bus", 0)
 DDK_PROTOCOL_DEF(USB_DCI,        'pUDC', "usb-dci", 0)  // Device Controller Interface
+DDK_PROTOCOL_DEF(USB_DEVICE,     'pUSD', "usb-device", 0)
 DDK_PROTOCOL_DEF(USB_PERIPHERAL, 'pUSP', "usb-peripheral", 0)
 DDK_PROTOCOL_DEF(USB_FUNCTION,   'pUSF', "usb-function", 0)
 DDK_PROTOCOL_DEF(USB_HCI,        'pUHI', "usb-hci", 0)  // Host Controller Interface
