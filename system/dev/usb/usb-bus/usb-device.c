@@ -15,6 +15,8 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
+static usb_protocol_ops_t _usb_protocol;
+
 // By default we create devices for the interfaces on the first configuration.
 // This table allows us to specify a different configuration for certain devices
 // based on their VID and PID.
@@ -104,6 +106,17 @@ static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int co
         }
     }
     return NULL;
+}
+
+static zx_status_t usb_device_get_protocol(void* ctx, uint32_t proto_id, void* protocol) {
+    if (proto_id == ZX_PROTOCOL_USB) {
+        usb_protocol_t* usb_proto = protocol;
+        usb_proto->ctx = ctx;
+        usb_proto->ops = &_usb_protocol;
+        return ZX_OK;
+    } else {
+        return ZX_ERR_NOT_SUPPORTED;
+    }
 }
 
 static zx_status_t usb_device_ioctl(void* ctx, uint32_t op, const void* in_buf, size_t in_len,
@@ -268,6 +281,7 @@ static void usb_device_release(void* ctx) {
 
 static zx_protocol_device_t usb_device_proto = {
     .version = DEVICE_OPS_VERSION,
+    .get_protocol = usb_device_get_protocol,
     .ioctl = usb_device_ioctl,
     .release = usb_device_release,
 };
