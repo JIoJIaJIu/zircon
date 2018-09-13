@@ -14,82 +14,6 @@
 #include "usb-interface.h"
 #include "util.h"
 
-// This thread is for calling the usb request completion callback for requests received from our
-// client. We do this on a separate thread because it is unsafe to call out on our own completion
-// callback, which is called on the main thread of the USB HCI driver.
-static int callback_thread(void* arg) {
-    usb_interface_t* intf = (usb_interface_t *)arg;
-    bool done = false;
-
-    while (!done) {
-        // wait for new usb requests to complete or for signal to exit this thread
-        sync_completion_wait(&intf->callback_thread_completion, ZX_TIME_INFINITE);
-
-        mtx_lock(&intf->callback_lock);
-
-        sync_completion_reset(&intf->callback_thread_completion);
-        done = intf->callback_thread_stop;
-
-        // copy completed requests to a temp list so we can process them outside of our lock
-        list_node_t temp_list = LIST_INITIAL_VALUE(temp_list);
-        list_move(&intf->completed_reqs, &temp_list);
-
-        mtx_unlock(&intf->callback_lock);
-
-        // call completion callbacks outside of the lock
-        usb_request_t* req;
-        while ((req = list_remove_head_type(&temp_list, usb_request_t, node))) {
-            usb_request_complete(req, req->response.status, req->response.actual);
-        }
-    }
-
-    return 0;
-}
-
-static void start_callback_thread(usb_interface_t* intf) {
-    // TODO(voydanoff) Once we have a way of knowing when a driver has bound to us, move the thread
-    // start there so we don't have to start a thread unless we know we will need it.
-    thrd_create_with_name(&intf->callback_thread, callback_thread, intf, "usb-interface-callback-thread");
-}
-
-static void stop_callback_thread(usb_interface_t* intf) {
-    mtx_lock(&intf->callback_lock);
-    intf->callback_thread_stop = true;
-    mtx_unlock(&intf->callback_lock);
-
-    sync_completion_signal(&intf->callback_thread_completion);
-    thrd_join(intf->callback_thread, NULL);
-}
-
-// usb request completion for the requests passed down to the HCI driver
-static void request_complete(usb_request_t* req, void* cookie) {
-    usb_interface_t* intf = (usb_interface_t *)req->cookie;
-
-    mtx_lock(&intf->callback_lock);
-    // move original request to completed_reqs list so it can be completed on the callback_thread
-    req->complete_cb = req->saved_complete_cb;
-    req->cookie = req->saved_cookie;
-    list_add_tail(&intf->completed_reqs, &req->node);
-    mtx_unlock(&intf->callback_lock);
-    sync_completion_signal(&intf->callback_thread_completion);
-}
-
-static void hci_queue(void* ctx, usb_request_t* req) {
-    usb_interface_t* intf = ctx;
-
-    req->header.device_id = intf->device_id;
-    // save the existing callback and cookie, so we can replace them
-    // with our own before passing the request to the HCI driver.
-    req->saved_complete_cb = req->complete_cb;
-    req->saved_cookie = req->cookie;
-
-    req->complete_cb = request_complete;
-    // set intf as the cookie so we can get at it in request_complete()
-    req->cookie = intf;
-
-    usb_hci_request_queue(&intf->hci, req);
-}
-
 static zx_status_t usb_interface_ioctl(void* ctx, uint32_t op, const void* in_buf,
                                        size_t in_len, void* out_buf, size_t out_len,
                                        size_t* out_actual) {
@@ -133,7 +57,6 @@ static void usb_interface_unbind(void* ctx) {
 static void usb_interface_release(void* ctx) {
     usb_interface_t* intf = ctx;
 
-    stop_callback_thread(intf);
     free(intf->descriptor);
     free(intf);
 }
@@ -301,7 +224,8 @@ static zx_status_t usb_interface_control(void* ctx, uint8_t request_type, uint8_
 }
 
 static void usb_interface_request_queue(void* ctx, usb_request_t* usb_request) {
-    hci_queue(ctx, usb_request);
+    usb_interface_t* intf = ctx;
+    usb_device_request_queue(intf->device, usb_request);
 }
 
 static usb_speed_t usb_interface_get_speed(void* ctx) {
@@ -473,12 +397,6 @@ zx_status_t usb_device_add_interface(usb_device_t* device,
     if (!intf)
         return ZX_ERR_NO_MEMORY;
 
-    mtx_init(&intf->callback_lock, mtx_plain);
-    sync_completion_reset(&intf->callback_thread_completion);
-    list_initialize(&intf->completed_reqs);
-
-    usb_request_pool_init(&intf->free_reqs);
-
     intf->device = device;
     intf->hci_zxdev = device->hci_zxdev;
     memcpy(&intf->hci, &device->hci, sizeof(usb_hci_protocol_t));
@@ -510,10 +428,6 @@ zx_status_t usb_device_add_interface(usb_device_t* device,
     list_add_head(&device->children, &intf->node);
     mtx_unlock(&device->interface_mutex);
 
-    // callback thread must be started before device_add() since it will recursively
-    // bind other drivers to us before it returns.
-    start_callback_thread(intf);
-
     char name[20];
     snprintf(name, sizeof(name), "ifc-%03d", interface_desc->bInterfaceNumber);
 
@@ -539,7 +453,6 @@ zx_status_t usb_device_add_interface(usb_device_t* device,
 
     status = device_add(device->zxdev, &args, &intf->zxdev);
     if (status != ZX_OK) {
-        stop_callback_thread(intf);
         list_delete(&intf->node);
         free(interface_desc);
         free(intf);
@@ -552,12 +465,9 @@ zx_status_t usb_device_add_interface_association(usb_device_t* device,
                                                  usb_interface_assoc_descriptor_t* assoc_desc,
                                                  size_t assoc_desc_length) {
     usb_interface_t* intf = calloc(1, sizeof(usb_interface_t));
-    if (!intf)
+    if (!intf) {
         return ZX_ERR_NO_MEMORY;
-
-    mtx_init(&intf->callback_lock, mtx_plain);
-    sync_completion_reset(&intf->callback_thread_completion);
-    list_initialize(&intf->completed_reqs);
+    }
 
     intf->device = device;
     intf->hci_zxdev = device->hci_zxdev;
@@ -593,10 +503,6 @@ zx_status_t usb_device_add_interface_association(usb_device_t* device,
         header = NEXT_DESCRIPTOR(header);
     }
 
-    // callback thread must be started before device_add() since it will recursively
-    // bind other drivers to us before it returns.
-    start_callback_thread(intf);
-
     mtx_lock(&device->interface_mutex);
     // need to do this first so usb_device_set_interface() can be called from driver bind
     list_add_head(&device->children, &intf->node);
@@ -627,7 +533,6 @@ zx_status_t usb_device_add_interface_association(usb_device_t* device,
 
     zx_status_t status = device_add(device->zxdev, &args, &intf->zxdev);
     if (status != ZX_OK) {
-        stop_callback_thread(intf);
         list_delete(&intf->node);
         free(assoc_desc);
         free(intf);
