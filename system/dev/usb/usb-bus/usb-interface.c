@@ -296,71 +296,8 @@ static zx_status_t usb_interface_control(void* ctx, uint8_t request_type, uint8_
                                          uint16_t value, uint16_t index, void* data,
                                          size_t length, zx_time_t timeout, size_t* out_length) {
     usb_interface_t* intf = ctx;
-
-    usb_request_t* req = NULL;
-    bool use_free_list = length == 0;
-    if (use_free_list) {
-        req = usb_request_pool_get(&intf->free_reqs, length);
-    }
-
-    if (req == NULL) {
-        zx_status_t status = usb_request_alloc(&req, intf->device->bus->bti_handle, length, 0);
-        if (status != ZX_OK) {
-            return status;
-        }
-    }
-
-    // fill in protocol data
-    usb_setup_t* setup = &req->setup;
-    setup->bmRequestType = request_type;
-    setup->bRequest = request;
-    setup->wValue = value;
-    setup->wIndex = index;
-    setup->wLength = length;
-
-    bool out = !!((request_type & USB_DIR_MASK) == USB_DIR_OUT);
-    if (length > 0 && out) {
-        usb_request_copyto(req, data, length, 0);
-    }
-
-    sync_completion_t completion = SYNC_COMPLETION_INIT;
-
-    req->header.device_id = intf->device_id;
-    req->header.length = length;
-    req->complete_cb = usb_control_complete;
-    req->cookie = &completion;
-    // We call this directly instead of via hci_queue, as it's safe to call our
-    // own completion callback, and prevents clients getting into odd deadlocks.
-    usb_hci_request_queue(&intf->hci, req);
-    zx_status_t status = sync_completion_wait(&completion, timeout);
-
-    if (status == ZX_OK) {
-        status = req->response.status;
-    } else if (status == ZX_ERR_TIMED_OUT) {
-        // cancel transactions and wait for request to be completed
-        sync_completion_reset(&completion);
-        status = usb_hci_cancel_all(&intf->hci, intf->device_id, 0);
-        if (status == ZX_OK) {
-            sync_completion_wait(&completion, ZX_TIME_INFINITE);
-            status = ZX_ERR_TIMED_OUT;
-        }
-    }
-    if (status == ZX_OK) {
-        if (out_length != NULL) {
-            *out_length = req->response.actual;
-        }
-
-        if (length > 0 && !out) {
-            usb_request_copyfrom(req, data, req->response.actual, 0);
-        }
-    }
-
-    if (use_free_list) {
-        usb_request_pool_add(&intf->free_reqs, req);
-    } else {
-        usb_request_release(req);
-    }
-    return status;
+    return usb_device_control(intf->device, request_type, request, value, index, data, length,
+                              timeout, out_length);
 }
 
 static void usb_interface_request_queue(void* ctx, usb_request_t* usb_request) {
