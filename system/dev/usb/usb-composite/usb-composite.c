@@ -36,6 +36,20 @@ static const usb_config_override_t config_overrides[] = {
 static zx_status_t usb_device_add_interfaces(usb_device_t* parent,
                                              usb_configuration_descriptor_t* config);
 
+zx_status_t usb_device_set_interface(usb_device_t* device, uint8_t interface_id,
+                                     uint8_t alt_setting) {
+    mtx_lock(&device->interface_mutex);
+    usb_interface_t* intf;
+    list_for_every_entry(&device->children, intf, usb_interface_t, node) {
+        if (usb_interface_contains_interface(intf, interface_id)) {
+            mtx_unlock(&device->interface_mutex);
+            return usb_interface_set_alt_setting(intf, interface_id, alt_setting);
+        }
+    }
+    mtx_unlock(&device->interface_mutex);
+    return ZX_ERR_INVALID_ARGS;
+}
+
 static usb_configuration_descriptor_t* get_config_desc(usb_device_t* dev, int config) {
     int num_configurations = dev->device_desc.bNumConfigurations;
     for (int i = 0; i < num_configurations; i++) {
@@ -78,6 +92,39 @@ zx_status_t usb_device_claim_interface(usb_device_t* dev, uint8_t interface_id) 
     mtx_unlock(&dev->interface_mutex);
 
     return ZX_OK;
+}
+
+zx_status_t usb_device_set_configuration(usb_device_t* dev, int config) {
+    int num_configurations = dev->device_desc.bNumConfigurations;
+    usb_configuration_descriptor_t* config_desc = NULL;
+    int config_index = -1;
+
+    // validate config and get the new current_config_index
+    for (int i = 0; i < num_configurations; i++) {
+        usb_configuration_descriptor_t* desc = dev->config_descs[i];
+        if (desc->bConfigurationValue == config) {
+            config_desc = desc;
+            config_index = i;
+            break;
+        }
+    }
+    if (!config_desc) return ZX_ERR_INVALID_ARGS;
+
+    // set configuration
+    zx_status_t status = usb_control(&dev->usb, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                                     USB_REQ_SET_CONFIGURATION, config, 0, NULL, 0, ZX_TIME_INFINITE, NULL);
+    if (status < 0) {
+        zxlogf(ERROR, "usb_device_set_configuration: USB_REQ_SET_CONFIGURATION failed\n");
+        return status;
+    }
+
+    dev->current_config_index = config_index;
+
+    // tear down and recreate the subdevices for our interfaces
+    usb_device_remove_interfaces(dev);
+    memset(dev->interface_statuses, 0,
+           config_desc->bNumInterfaces * sizeof(interface_status_t));
+    return usb_device_add_interfaces(dev, config_desc);
 }
 
 static void usb_device_unbind(void* ctx) {

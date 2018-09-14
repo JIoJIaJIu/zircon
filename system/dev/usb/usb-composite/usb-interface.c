@@ -567,19 +567,14 @@ bool usb_interface_contains_interface(usb_interface_t* intf, uint8_t interface_i
     return false;
 }
 
-/*
 zx_status_t usb_interface_set_alt_setting(usb_interface_t* intf, uint8_t interface_id,
                                           uint8_t alt_setting) {
     zx_status_t status = usb_interface_configure_endpoints(intf, interface_id, alt_setting);
-    if (status != ZX_OK) return status;
-
-
-static inline zx_status_t usb_get_status(const usb_protocol_t* usb, uint8_t request_type,
-                                         uint16_t index, void* data, size_t length,
-                                         zx_time_t timeout, size_t* out_length) {
+    if (status != ZX_OK) {
+        return status;
+    }
 
     return usb_control(&intf->device->usb, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
                        USB_REQ_SET_INTERFACE, alt_setting, interface_id, NULL, 0, ZX_TIME_INFINITE,
                        NULL);
 }
-*/
