@@ -505,7 +505,9 @@ zx_status_t usb_device_set_configuration(void* ctx, uint8_t config) {
            config_desc->bNumInterfaces * sizeof(interface_status_t));
     return usb_device_add_interfaces(dev, config_desc);
 */
-return -1;
+    usb_device_t* dev = ctx;
+    return usb_util_control(dev, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                            USB_REQ_SET_CONFIGURATION, config, 0, NULL, 0);
 }
 
 static zx_status_t usb_device_enable_endpoint(void* ctx, usb_endpoint_descriptor_t* ep_desc,
@@ -712,7 +714,6 @@ zx_status_t usb_device_add(usb_bus_t* bus, uint32_t device_id, uint32_t hub_id,
     snprintf(name, sizeof(name), "%03d", device_id);
 
     zx_device_prop_t props[] = {
-        { BIND_PROTOCOL, 0, ZX_PROTOCOL_USB },
         { BIND_USB_VID, 0, device_desc->idVendor },
         { BIND_USB_PID, 0, device_desc->idProduct },
         { BIND_USB_CLASS, 0, device_desc->bDeviceClass },

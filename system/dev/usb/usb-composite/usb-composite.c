@@ -255,7 +255,7 @@ static zx_status_t usb_device_add_interfaces(usb_device_t* parent,
 
 static zx_status_t usb_composite_bind(void* ctx, zx_device_t* parent) {
     usb_protocol_t usb;
-    zx_status_t status = device_get_protocol(parent, ZX_PROTOCOL_USB_DEVICE, &usb);
+    zx_status_t status = device_get_protocol(parent, ZX_PROTOCOL_USB, &usb);
     if (status != ZX_OK) {
         return status;
     }
@@ -284,7 +284,8 @@ static zx_status_t usb_composite_bind(void* ctx, zx_device_t* parent) {
         // read configuration descriptor header to determine size
         usb_configuration_descriptor_t config_desc_header;
         size_t actual;
-        status = usb_get_descriptor(&usb, USB_DT_CONFIG, config, 0, &config_desc_header,
+        status = usb_get_descriptor(&usb, USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                                    USB_DT_CONFIG, config, &config_desc_header,
                                     sizeof(config_desc_header), ZX_TIME_INFINITE, &actual);
         if (status != ZX_OK) {
             zxlogf(ERROR, "usb_device_add: usb_get_descriptor failed\n");
@@ -303,7 +304,8 @@ static zx_status_t usb_composite_bind(void* ctx, zx_device_t* parent) {
         configs[config] = config_desc;
 
         // read full configuration descriptor
-        status = usb_get_descriptor(&usb, USB_DT_CONFIG, config, 0, config_desc, config_desc_size,
+        status = usb_get_descriptor(&usb, USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                                    USB_DT_CONFIG, config, config_desc, config_desc_size,
                                     ZX_TIME_INFINITE, &actual);
          if (status != ZX_OK) {
             zxlogf(ERROR, "usb_device_add: usb_get_descriptor failed\n");
@@ -338,10 +340,6 @@ static zx_status_t usb_composite_bind(void* ctx, zx_device_t* parent) {
         zxlogf(ERROR, "usb_device_add: usb_set_configuration failed\n");
         goto error_exit;
     }
-
-    zxlogf(INFO, "* found USB device (0x%04x:0x%04x, USB %x.%x) config %u\n",
-            device_desc.idVendor, device_desc.idProduct, device_desc.bcdUSB >> 8,
-            device_desc.bcdUSB & 0xff, configuration);
 
     list_initialize(&dev->children);
     dev->config_descs = configs;
