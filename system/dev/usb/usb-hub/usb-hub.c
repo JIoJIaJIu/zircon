@@ -439,7 +439,6 @@ static zx_status_t usb_hub_bind(void* ctx, zx_device_t* device) {
         ep_addr = endp->bEndpointAddress;
         max_packet_size = usb_ep_max_packet(endp);
     }
-    usb_desc_iter_release(&iter);
 
     if (!ep_addr) {
         return ZX_ERR_NOT_SUPPORTED;
@@ -467,6 +466,24 @@ static zx_status_t usb_hub_bind(void* ctx, zx_device_t* device) {
     req->complete_cb = usb_hub_interrupt_complete;
     req->cookie = hub;
     hub->status_request = req;
+
+    status = usb_set_interface(&usb, intf->bInterfaceNumber, 0);
+    if (status != ZX_OK) {
+        zxlogf(ERROR, "%s: usb_set_interface failed %d\n", __FUNCTION__, status);
+        usb_desc_iter_release(&iter);
+        usb_hub_free(hub);
+        return status;
+    }
+
+    status = usb_enable_endpoint(&usb, endp, NULL /* FIXME */, true);
+    if (status != ZX_OK) {
+        zxlogf(ERROR, "%s: usb_enable_endpoint failed %d\n", __FUNCTION__, status);
+        usb_desc_iter_release(&iter);
+        usb_hub_free(hub);
+        return status;
+    }
+
+    usb_desc_iter_release(&iter);
 
     device_add_args_t args = {
         .version = DEVICE_ADD_ARGS_VERSION,
@@ -502,6 +519,6 @@ static zx_driver_ops_t usb_hub_driver_ops = {
 };
 
 ZIRCON_DRIVER_BEGIN(usb_hub, usb_hub_driver_ops, "zircon", "0.1", 2)
-    BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_USB),
+    BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_USB_DEVICE),
     BI_MATCH_IF(EQ, BIND_USB_CLASS, USB_CLASS_HUB),
 ZIRCON_DRIVER_END(usb_hub)

@@ -283,7 +283,6 @@ static inline zx_status_t usb_set_configuration(const usb_protocol_t* usb, uint8
     return usb->ops->set_configuration(usb->ctx, configuration);
 }
 
-
 static inline zx_status_t usb_enable_endpoint(const usb_protocol_t* usb,
                                               usb_endpoint_descriptor_t* ep_desc,
                                               usb_ss_ep_comp_descriptor_t* ss_comp_desc,

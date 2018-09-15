@@ -455,56 +455,12 @@ static usb_speed_t usb_device_get_speed(void* ctx) {
 
 static zx_status_t usb_device_set_interface(void* ctx, uint8_t interface_number,
                                             uint8_t alt_setting) {
-/*
     usb_device_t* dev = ctx;
-
-    mtx_lock(&dev->interface_mutex);
-    usb_interface_t* intf;
-    list_for_every_entry(&dev->children, intf, usb_interface_t, node) {
-        if (usb_interface_contains_interface(intf, interface_number)) {
-            mtx_unlock(&dev->interface_mutex);
-            return usb_interface_set_alt_setting(intf, interface_number, alt_setting);
-        }
-    }
-    mtx_unlock(&dev->interface_mutex);
-*/
-    return ZX_ERR_INVALID_ARGS;
+    return usb_util_control(dev, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
+                            USB_REQ_SET_INTERFACE, alt_setting, interface_number, NULL, 0);
 }
 
 zx_status_t usb_device_set_configuration(void* ctx, uint8_t config) {
-/* FIXME
-    usb_device_t* dev = ctx;
-    int num_configurations = dev->device_desc.bNumConfigurations;
-    usb_configuration_descriptor_t* config_desc = NULL;
-    int config_index = -1;
-
-    // validate config and get the new current_config_index
-    for (int i = 0; i < num_configurations; i++) {
-        usb_configuration_descriptor_t* desc = dev->config_descs[i];
-        if (desc->bConfigurationValue == config) {
-            config_desc = desc;
-            config_index = i;
-            break;
-        }
-    }
-    if (!config_desc) return ZX_ERR_INVALID_ARGS;
-
-    // set configuration
-    zx_status_t status = usb_util_control(dev, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
-                                          USB_REQ_SET_CONFIGURATION, config, 0, NULL, 0);
-    if (status < 0) {
-        zxlogf(ERROR, "usb_device_set_configuration: USB_REQ_SET_CONFIGURATION failed\n");
-        return status;
-    }
-
-    dev->current_config_index = config_index;
-
-    // tear down and recreate the subdevices for our interfaces
-    usb_device_remove_interfaces(dev);
-    memset(dev->interface_statuses, 0,
-           config_desc->bNumInterfaces * sizeof(interface_status_t));
-    return usb_device_add_interfaces(dev, config_desc);
-*/
     usb_device_t* dev = ctx;
     return usb_util_control(dev, USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
                             USB_REQ_SET_CONFIGURATION, config, 0, NULL, 0);

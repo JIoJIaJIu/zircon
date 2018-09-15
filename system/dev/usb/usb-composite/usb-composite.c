@@ -387,6 +387,8 @@ static zx_driver_ops_t usb_composite_driver_ops = {
     .bind = usb_composite_bind,
 };
 
-ZIRCON_DRIVER_BEGIN(usb_composite, usb_composite_driver_ops, "zircon", "0.1", 1)
+// The '*' in the version string is important. This marks this driver as a fallback,
+// to allow other drivers to bind against ZX_PROTOCOL_USB_DEVICE to handle more specific cases.
+ZIRCON_DRIVER_BEGIN(usb_composite, usb_composite_driver_ops, "zircon", "*0.1", 1)
     BI_MATCH_IF(EQ, BIND_PROTOCOL, ZX_PROTOCOL_USB_DEVICE),
 ZIRCON_DRIVER_END(usb_composite)

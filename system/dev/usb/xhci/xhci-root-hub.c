@@ -442,6 +442,11 @@ static zx_status_t xhci_rh_control(xhci_t* xhci, xhci_root_hub_t* rh, usb_setup_
         // nothing to do here
         usb_request_complete(req, ZX_OK, 0);
         return ZX_OK;
+    } else if (request_type == (USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE) &&
+               request == USB_REQ_SET_INTERFACE && req->header.length == 0) {
+        // nothing to do here
+        usb_request_complete(req, ZX_OK, 0);
+        return ZX_OK;
     }
 
     zxlogf(ERROR, "unsupported root hub control request type: 0x%02X req: %d value: %d index: %d\n",
